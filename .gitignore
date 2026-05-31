@@ -1,0 +1,23 @@
+# 依存パッケージ
+node_modules/
+
+# ビルド成果物
+out/
+release/
+
+# 環境変数（Supabase キーなど。絶対にコミットしない）
+.env
+.env.*
+!.env.example
+
+# ログ
+*.log
+npm-debug.log*
+
+# エディタ設定
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
