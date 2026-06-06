@@ -2,12 +2,14 @@ export interface GameSettings {
   noteSpeed: number;        // px/s  100–900
   volume: number;           // 0–100 (%)
   judgmentOffset: number;   // ms  -200–+200（正=遅め補正）
+  showSyncLine: boolean;    // 同時押しライン表示
 }
 
 export const SETTINGS_DEFAULTS: GameSettings = {
   noteSpeed: 400,
   volume: 100,
-  judgmentOffset: 0
+  judgmentOffset: 0,
+  showSyncLine: true
 };
 
 const KEY = 'sharerhyth_settings';

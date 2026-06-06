@@ -118,7 +118,8 @@ export const GameplayScreen: React.FC = () => {
       const ct = audio.currentTime;
 
       if (!notesAdded && notesLoadedRef.current && renderer.isReady) {
-        renderer.loadNotes(chart.notes);
+        renderer.setShowSyncLine(loadSettings().showSyncLine);
+        renderer.loadNotes(chart.notes, 60 / chart.bpm);
         notesAdded = true;
       }
 

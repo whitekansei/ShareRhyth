@@ -140,6 +140,31 @@ export const GameSettingsModal: React.FC<Props> = ({ onClose }) => {
           </div>
         </div>
 
+        {/* ── 同時押しライン ── */}
+        <div style={sectionStyle}>
+          <div
+            style={{ ...labelStyle, cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => update('showSyncLine', !s.showSyncLine)}
+          >
+            <span style={{ fontSize: 13, fontWeight: 700 }}>同時押しライン</span>
+            <div style={{
+              width: 44, height: 24, borderRadius: 12, flexShrink: 0,
+              background: s.showSyncLine ? '#6666ff' : '#333',
+              position: 'relative', transition: 'background 0.2s'
+            }}>
+              <div style={{
+                position: 'absolute', top: 3,
+                left: s.showSyncLine ? 23 : 3,
+                width: 18, height: 18, borderRadius: '50%',
+                background: '#fff', transition: 'left 0.2s'
+              }} />
+            </div>
+          </div>
+          <div style={hintStyle}>
+            同時に押すノーツを白い横線で繋いで表示します。
+          </div>
+        </div>
+
         {/* ボタン */}
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
           <button

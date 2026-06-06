@@ -12,10 +12,13 @@ const LANE_COLORS: Record<Lane, number> = {
 };
 
 const JUDGE_LINE_RATIO = 0.85;
+const VANISH_Y_RATIO = 0.20;   // 消失点の位置（画面上部20%）
+const PREVIEW_FADE_BEATS = 1.5; // クロスレーンプレビューのフェードイン開始（拍数）
 
 interface ActiveNote {
   note: Note;
   gfx: Graphics;
+  color: number;
 }
 
 interface HitEffect {
@@ -32,22 +35,32 @@ interface LongNoteBar {
   startLane: number;
   endLane: number;
   gfx: Graphics;
-  color: number;
+  previewGfx: Graphics | null; // クロスレーン時のみ存在
+  color: number;     // 始点レーンの色（バー描画用）
+  endColor: number;  // 終点レーンの色（プレビュー描画用）
 }
 
 export class NoteRenderer {
   private app: Application;
   private laneContainer!: Container;
   private longNoteContainer!: Container;
+  private syncLineGfx!: Graphics;
   private noteContainer!: Container;
+  private previewContainer!: Container;
   private effectContainer!: Container;
   private judgeLineY = 0;
+  private vanishY = 0;
+  private vanishX = 0;
+  private fieldHeight = 0;
   private laneWidth = 0;
   private laneOffsetX = 0;
+  private beatDuration = 0.5; // デフォルト120BPM
   private activeNotes: ActiveNote[] = [];
   private hitEffects: HitEffect[] = [];
   private laneFlashes: Array<{ gfx: Graphics; frames: number }> = [];
   private longNoteBars: LongNoteBar[] = [];
+  private simultaneousGroups: Array<Set<string>> = [];
+  private showSyncLine = true;
   private _ready = false;
   private _destroyed = false;
   public readyPromise: Promise<void>;
@@ -60,7 +73,7 @@ export class NoteRenderer {
         width: canvas.clientWidth || 1280,
         height: canvas.clientHeight || 720,
         backgroundColor: 0x0a0a0f,
-        antialias: false,
+        antialias: true,
         resolution: window.devicePixelRatio || 1,
         autoDensity: true,
         preference: 'canvas'
@@ -84,37 +97,84 @@ export class NoteRenderer {
     const TOTAL_LANE_W = screen.width * 0.55;
     this.laneWidth = TOTAL_LANE_W / LANE_COUNT;
     this.laneOffsetX = (screen.width - TOTAL_LANE_W) / 2;
+    this.vanishX = this.laneOffsetX + (LANE_COUNT / 2) * this.laneWidth;
+    this.vanishY = screen.height * VANISH_Y_RATIO;
+    this.fieldHeight = this.judgeLineY - this.vanishY;
 
     this.laneContainer = new Container();
     this.longNoteContainer = new Container();
+    this.syncLineGfx = new Graphics();
     this.noteContainer = new Container();
+    this.previewContainer = new Container();
     this.effectContainer = new Container();
 
-    // z-order: lanes → long note bars → notes → effects
+    // z-order: lanes → longNotes → syncLines → notes → previews → effects
     this.app.stage.addChild(this.laneContainer);
     this.app.stage.addChild(this.longNoteContainer);
+    this.app.stage.addChild(this.syncLineGfx);
     this.app.stage.addChild(this.noteContainer);
+    this.app.stage.addChild(this.previewContainer);
     this.app.stage.addChild(this.effectContainer);
 
     this.drawLanes();
     this.drawKeyLabels();
   }
 
+  // 透視投影ヘルパー
+  // lanePos: レーン単位の横位置（例: laneIdx + 0.5 でレーン中央）
+  // dt: 判定バーに到達するまでの秒数（正=未来、負=通過済み）
+  // 戻り値 scale=1 が判定バー上、scale→0 が消失点方向
+  private perspProject(
+    dt: number,
+    lanePos: number,
+    speed: number
+  ): { x: number; y: number; scale: number } {
+    const linearDepth = dt * speed / this.fieldHeight;
+    // linearDepth が -1 に近づくと scale が発散するので下限ガード
+    const scale = linearDepth < -0.95 ? 20 : 1 / (1 + linearDepth);
+    const xBottom = this.laneOffsetX + lanePos * this.laneWidth;
+    return {
+      x: this.vanishX + (xBottom - this.vanishX) * scale,
+      y: this.vanishY + this.fieldHeight * scale,
+      scale
+    };
+  }
+
   private drawLanes(): void {
     const { screen } = this.app;
+
+    // フィールド背景（消失点から判定バーへの三角形）
     const bg = new Graphics();
-    bg.rect(this.laneOffsetX, 0, this.laneWidth * LANE_COUNT, screen.height);
+    bg.moveTo(this.vanishX, this.vanishY)
+      .lineTo(this.laneOffsetX, this.judgeLineY)
+      .lineTo(this.laneOffsetX + LANE_COUNT * this.laneWidth, this.judgeLineY)
+      .closePath();
     bg.fill({ color: 0x111118 });
     this.laneContainer.addChild(bg);
 
+    // 奥行きグリッド線（画面スペースで等間隔）
+    const NUM_DEPTH_LINES = 10;
+    for (let i = 1; i <= NUM_DEPTH_LINES; i++) {
+      const s = i / (NUM_DEPTH_LINES + 1);
+      const y = this.vanishY + this.fieldHeight * s;
+      const leftX = this.vanishX + (this.laneOffsetX - this.vanishX) * s;
+      const rightX = this.vanishX + (this.laneOffsetX + LANE_COUNT * this.laneWidth - this.vanishX) * s;
+      const gridLine = new Graphics();
+      gridLine.moveTo(leftX, y).lineTo(rightX, y);
+      gridLine.stroke({ color: 0x2a2a44, width: 1, alpha: s * 0.9 });
+      this.laneContainer.addChild(gridLine);
+    }
+
+    // レーン区切り線（消失点から判定バーへ収束）
     for (let i = 0; i <= LANE_COUNT; i++) {
-      const x = this.laneOffsetX + i * this.laneWidth;
+      const xBottom = this.laneOffsetX + i * this.laneWidth;
       const line = new Graphics();
-      line.moveTo(x, 0).lineTo(x, screen.height);
+      line.moveTo(this.vanishX, this.vanishY).lineTo(xBottom, this.judgeLineY);
       line.stroke({ color: 0x333355, width: 1 });
       this.laneContainer.addChild(line);
     }
 
+    // 判定バー
     const judgeLine = new Graphics();
     judgeLine.rect(this.laneOffsetX, this.judgeLineY - 3, this.laneWidth * LANE_COUNT, 6);
     judgeLine.fill({ color: 0xffffff });
@@ -124,6 +184,15 @@ export class NoteRenderer {
     glowLine.rect(this.laneOffsetX, this.judgeLineY - 8, this.laneWidth * LANE_COUNT, 16);
     glowLine.fill({ color: 0x6666ff, alpha: 0.3 });
     this.laneContainer.addChild(glowLine);
+
+    // 判定バー下のエリア
+    const belowH = screen.height - this.judgeLineY;
+    if (belowH > 0) {
+      const below = new Graphics();
+      below.rect(this.laneOffsetX, this.judgeLineY, LANE_COUNT * this.laneWidth, belowH);
+      below.fill({ color: 0x0d0d1a });
+      this.laneContainer.addChild(below);
+    }
   }
 
   private drawKeyLabels(): void {
@@ -143,12 +212,34 @@ export class NoteRenderer {
     });
   }
 
-  // ノーツを全件まとめてロード（ロングノーツバーも自動設定）
-  loadNotes(notes: Note[]): void {
+  setShowSyncLine(show: boolean): void {
+    this.showSyncLine = show;
+  }
+
+  // ノーツを全件まとめてロード（ロングノーツバー・終端プレビューも自動設定）
+  loadNotes(notes: Note[], beatDuration?: number): void {
     if (!this._ready || !this.app.stage) return;
+    if (beatDuration !== undefined) this.beatDuration = beatDuration;
 
     for (const note of notes) {
       this.addNote(note);
+    }
+
+    // 同時押しグループ検出（同じ time 値を持つノーツ群）
+    this.simultaneousGroups = [];
+    const timeMap = new Map<number, string[]>();
+    for (const note of notes) {
+      const bucket = timeMap.get(note.time);
+      if (bucket) {
+        bucket.push(note.id);
+      } else {
+        timeMap.set(note.time, [note.id]);
+      }
+    }
+    for (const ids of timeMap.values()) {
+      if (ids.length >= 2) {
+        this.simultaneousGroups.push(new Set(ids));
+      }
     }
 
     const noteMap = new Map(notes.map(n => [n.id, n]));
@@ -157,17 +248,29 @@ export class NoteRenderer {
       const endNote = noteMap.get(note.longNoteEndId);
       if (!endNote) continue;
 
+      const startLaneIdx = LANE_KEYS[note.lane];
+      const endLaneIdx = LANE_KEYS[endNote.lane];
+
       const gfx = new Graphics();
       this.longNoteContainer.addChild(gfx);
+
+      let previewGfx: Graphics | null = null;
+      if (startLaneIdx !== endLaneIdx) {
+        previewGfx = new Graphics();
+        this.previewContainer.addChild(previewGfx);
+      }
+
       this.longNoteBars.push({
         startNoteId: note.id,
         endNoteId: note.longNoteEndId,
         startNoteTime: note.time,
         endNoteTime: endNote.time,
-        startLane: LANE_KEYS[note.lane],
-        endLane: LANE_KEYS[endNote.lane],
+        startLane: startLaneIdx,
+        endLane: endLaneIdx,
         gfx,
-        color: LANE_COLORS[note.lane]
+        previewGfx,
+        color: LANE_COLORS[note.lane],
+        endColor: LANE_COLORS[endNote.lane]
       });
     }
   }
@@ -176,75 +279,136 @@ export class NoteRenderer {
     if (!this._ready || !this.app.stage) return;
     const color = LANE_COLORS[note.lane];
     if (color === undefined) return;
-    const laneIdx = LANE_KEYS[note.lane];
-    const x = this.laneOffsetX + (laneIdx + 0.5) * this.laneWidth;
 
     const gfx = new Graphics();
-    gfx.roundRect(-this.laneWidth * 0.38, -10, this.laneWidth * 0.76, 20, 6);
-    gfx.fill({ color });
-    gfx.roundRect(-this.laneWidth * 0.38, -10, this.laneWidth * 0.76, 20, 6);
-    gfx.stroke({ color: 0xffffff, width: 2, alpha: 0.6 });
-    gfx.x = x;
-    gfx.y = -50;
-
+    gfx.visible = false; // updateNotes で透視投影して描画
     this.noteContainer.addChild(gfx);
-    this.activeNotes.push({ note, gfx });
+    this.activeNotes.push({ note, gfx, color });
   }
 
   updateNotes(currentTime: number, speed: number): void {
     if (!this._ready) return;
 
-    // ── ロングノーツバー更新 ──
+    // ── ロングノーツバー（透視投影四辺形）──
     for (const bar of this.longNoteBars) {
-      const sx = this.laneOffsetX + (bar.startLane + 0.5) * this.laneWidth;
-      const ex = this.laneOffsetX + (bar.endLane + 0.5) * this.laneWidth;
-      const hw = this.laneWidth * 0.38;
-      // startNoteTime < endNoteTime なので sy > ey（始点が画面下側）
-      const sy = this.judgeLineY - (bar.startNoteTime - currentTime) * speed;
-      const ey = this.judgeLineY - (bar.endNoteTime - currentTime) * speed;
-
       bar.gfx.clear();
 
-      // 終点が判定ラインを過ぎたら描画不要
-      if (ey >= this.judgeLineY) continue;
+      const startDt = bar.startNoteTime - currentTime;
+      const endDt = bar.endNoteTime - currentTime;
 
-      // 判定ラインでクリップした4頂点を求める
-      // 同レーン → 長方形、異レーン → 平行四辺形
-      let x0: number, y0: number, x1: number, y1: number; // 下辺（始点側）左・右
-      if (sy <= this.judgeLineY) {
-        // 始点がまだ判定ラインより上 → クリップ不要
-        x0 = sx - hw;  y0 = sy;
-        x1 = sx + hw;  y1 = sy;
-      } else {
-        // 始点が判定ラインを通過 → 判定ライン上の交点に切り詰める
-        const t = (sy - this.judgeLineY) / (sy - ey); // 0=始点側, 1=終点側
-        x0 = (sx - hw) + t * (ex - sx);  y0 = this.judgeLineY;
-        x1 = (sx + hw) + t * (ex - sx);  y1 = this.judgeLineY;
-      }
+      if (endDt < 0) continue; // 終点通過済み
 
-      // 上辺（終点側）
-      const x2 = ex + hw,  y2 = ey;
-      const x3 = ex - hw,  y3 = ey;
+      const endProj = this.perspProject(endDt, bar.endLane + 0.5, speed);
+      if (endProj.y < this.vanishY - 10) continue; // 消失点より奥
+
+      // 始点は判定バー以下にクリップ（通過後はバーを判定バーに張り付ける）
+      const clampedStartDt = Math.max(0, startDt);
+
+      // 四頂点（lane + 0.12 = 左端、lane + 0.88 = 右端）
+      const bl = this.perspProject(clampedStartDt, bar.startLane + 0.12, speed);
+      const br = this.perspProject(clampedStartDt, bar.startLane + 0.88, speed);
+      const tl = this.perspProject(endDt, bar.endLane + 0.12, speed);
+      const tr = this.perspProject(endDt, bar.endLane + 0.88, speed);
 
       bar.gfx
-        .moveTo(x0, y0)
-        .lineTo(x1, y1)
-        .lineTo(x2, y2)
-        .lineTo(x3, y3)
+        .moveTo(bl.x, bl.y)
+        .lineTo(br.x, br.y)
+        .lineTo(tr.x, tr.y)
+        .lineTo(tl.x, tl.y)
         .closePath();
-      bar.gfx.fill({ color: bar.color, alpha: 0.4 });
+      bar.gfx.fill({ color: bar.color, alpha: 0.45 });
+      bar.gfx.stroke({ color: bar.color, width: 1, alpha: 0.7 });
     }
 
-    // ── ノーツ位置更新 ──
+    // ── 終端ノーツ予測表示（クロスレーンロングノーツのみ）──
+    for (const bar of this.longNoteBars) {
+      if (!bar.previewGfx) continue;
+      bar.previewGfx.clear();
+
+      const endTimeToBar = bar.endNoteTime - currentTime;
+      if (endTimeToBar <= 0) continue;
+
+      const timeToStart = bar.startNoteTime - currentTime;
+      const fadeDuration = PREVIEW_FADE_BEATS * this.beatDuration;
+      const fadeProgress = Math.min(1, Math.max(0, 1 - timeToStart / fadeDuration));
+      if (fadeProgress <= 0) continue;
+
+      const alpha = fadeProgress * 0.65;
+      const ex = this.laneOffsetX + (bar.endLane + 0.5) * this.laneWidth;
+
+      // 外側ターゲットリング（プレビューと実ノーツを視覚的に区別）
+      bar.previewGfx.roundRect(-this.laneWidth * 0.44, -13, this.laneWidth * 0.88, 26, 9);
+      bar.previewGfx.stroke({ color: bar.endColor, width: 2, alpha: fadeProgress * 0.5 });
+
+      // 本体（半透明）
+      bar.previewGfx.roundRect(-this.laneWidth * 0.38, -10, this.laneWidth * 0.76, 20, 6);
+      bar.previewGfx.fill({ color: bar.endColor, alpha });
+      bar.previewGfx.roundRect(-this.laneWidth * 0.38, -10, this.laneWidth * 0.76, 20, 6);
+      bar.previewGfx.stroke({ color: 0xffffff, width: 1.5, alpha: alpha * 0.7 });
+
+      bar.previewGfx.x = ex;
+      bar.previewGfx.y = this.judgeLineY;
+    }
+
+    // ── ノーツ（透視投影・毎フレーム再描画）──
     const offScreenIds: string[] = [];
+    const posCache = new Map<string, { x: number; y: number; scale: number }>();
     for (const an of this.activeNotes) {
-      const y = this.judgeLineY - (an.note.time - currentTime) * speed;
+      const dt = an.note.time - currentTime;
+      const laneIdx = LANE_KEYS[an.note.lane];
+      const { x, y, scale } = this.perspProject(dt, laneIdx + 0.5, speed);
+
+      if (y > this.app.screen.height + 60) {
+        offScreenIds.push(an.note.id);
+        continue;
+      }
+      if (scale < 0.04 || y < this.vanishY - 10) {
+        an.gfx.visible = false;
+        continue;
+      }
+
+      an.gfx.visible = true;
+      an.gfx.clear();
+
+      const hw = this.laneWidth * 0.38 * scale;
+      const hh = Math.max(3, 9 * scale);
+      const r = Math.max(2, 5 * scale);
+      const strokeW = Math.max(0.5, 2 * scale);
+
+      an.gfx.roundRect(-hw, -hh, hw * 2, hh * 2, r);
+      an.gfx.fill({ color: an.color });
+      an.gfx.roundRect(-hw, -hh, hw * 2, hh * 2, r);
+      an.gfx.stroke({ color: 0xffffff, width: strokeW, alpha: 0.6 });
+
+      an.gfx.x = x;
       an.gfx.y = y;
-      if (y > this.app.screen.height + 60) offScreenIds.push(an.note.id);
+      posCache.set(an.note.id, { x, y, scale });
     }
     for (const id of offScreenIds) this.removeNote(id);
 
-    // ── ヒットエフェクト更新 ──
+    // ── 同時押しライン ──
+    this.syncLineGfx.clear();
+    if (this.showSyncLine) {
+      for (const group of this.simultaneousGroups) {
+        const positions: Array<{ x: number; y: number; scale: number }> = [];
+        for (const id of group) {
+          const pos = posCache.get(id);
+          if (pos) positions.push(pos);
+        }
+        if (positions.length < 2) continue;
+        positions.sort((a, b) => a.x - b.x);
+        const leftX = positions[0].x;
+        const rightX = positions[positions.length - 1].x;
+        const y = positions[0].y; // 同 time なので y は全て同じ
+        const scale = positions[0].scale;
+        this.syncLineGfx
+          .moveTo(leftX, y)
+          .lineTo(rightX, y);
+        this.syncLineGfx.stroke({ color: 0xffffff, width: Math.max(1, 2.5 * scale), alpha: 0.55 });
+      }
+    }
+
+    // ── ヒットエフェクト ──
     for (const ef of [...this.hitEffects]) {
       ef.frames--;
       ef.gfx.alpha = ef.frames / 20;
@@ -253,7 +417,6 @@ export class NoteRenderer {
         this.hitEffects = this.hitEffects.filter((e) => e !== ef);
       }
     }
-
     for (const fl of [...this.laneFlashes]) {
       fl.frames--;
       fl.gfx.alpha = fl.frames / 8;
@@ -271,10 +434,11 @@ export class NoteRenderer {
       this.activeNotes.splice(idx, 1);
     }
 
-    // 終点ノーツが消えたらバーも削除
+    // 終点ノーツが消えたらバーと予測表示も削除
     const barIdx = this.longNoteBars.findIndex(b => b.endNoteId === noteId);
     if (barIdx !== -1) {
       this.longNoteBars[barIdx].gfx.destroy();
+      this.longNoteBars[barIdx].previewGfx?.destroy();
       this.longNoteBars.splice(barIdx, 1);
     }
   }
@@ -291,8 +455,17 @@ export class NoteRenderer {
     this.effectContainer.addChild(gfx);
     this.hitEffects.push({ gfx, lane: laneIdx, frames: 20 });
 
+    // レーンフラッシュ（透視形状：判定バーから消失点方向へのくさび形）
+    const leftX = this.laneOffsetX + laneIdx * this.laneWidth;
+    const rightX = this.laneOffsetX + (laneIdx + 1) * this.laneWidth;
+    const flashScale = 0.30;
     const flash = new Graphics();
-    flash.rect(this.laneOffsetX + laneIdx * this.laneWidth, 0, this.laneWidth, this.judgeLineY);
+    flash
+      .moveTo(leftX, this.judgeLineY)
+      .lineTo(rightX, this.judgeLineY)
+      .lineTo(this.vanishX + (rightX - this.vanishX) * flashScale, this.vanishY + this.fieldHeight * flashScale)
+      .lineTo(this.vanishX + (leftX - this.vanishX) * flashScale, this.vanishY + this.fieldHeight * flashScale)
+      .closePath();
     flash.fill({ color, alpha: 0.12 });
     this.effectContainer.addChild(flash);
     this.laneFlashes.push({ gfx: flash, frames: 8 });
@@ -305,6 +478,9 @@ export class NoteRenderer {
     const TOTAL_LANE_W = width * 0.55;
     this.laneWidth = TOTAL_LANE_W / LANE_COUNT;
     this.laneOffsetX = (width - TOTAL_LANE_W) / 2;
+    this.vanishX = this.laneOffsetX + (LANE_COUNT / 2) * this.laneWidth;
+    this.vanishY = height * VANISH_Y_RATIO;
+    this.fieldHeight = this.judgeLineY - this.vanishY;
     this.drawLanes();
     this.drawKeyLabels();
   }
