@@ -40,7 +40,7 @@ export const ResultScreen: React.FC = () => {
   const rank = calcRank(score);
   const isFullCombo = counts.MISS === 0 && total > 0;
   const achievement = total > 0
-    ? Math.round((counts.PERFECT * 1.01 + counts.GREAT * 1.00 + counts.GOOD * 0.50) * 100 / total * 10000) / 10000
+    ? Math.round((counts.PERFECT * 1.00 + counts.GREAT * 0.90 + counts.GOOD * 0.50) * 100 / total * 10000) / 10000
     : 0;
 
   const RANK_COLORS: Record<string, string> = {
