@@ -74,7 +74,7 @@ export const GameplayScreen: React.FC = () => {
     judgement.loadChart(chart.notes);
     judgement.setJudgmentOffset(settings.judgmentOffset);
     notesLoadedRef.current = true;
-    gameplay.reset();
+    gameplay.init(chart.notes.length);
 
     // カウントダウン 3→2→1→start
     let count = 3;

@@ -13,13 +13,15 @@ interface ResultState {
   folderPath: string;
 }
 
-function calcRank(score: number, total: number): string {
-  if (total === 0) return 'F';
-  const ratio = score / (total * 1000);
-  if (ratio >= 0.95) return 'S';
-  if (ratio >= 0.85) return 'A';
-  if (ratio >= 0.70) return 'B';
-  if (ratio >= 0.50) return 'C';
+function calcRank(score: number): string {
+  if (score >= 975_000) return 'S';
+  if (score >= 950_000) return 'AAA';
+  if (score >= 925_000) return 'AA';
+  if (score >= 900_000) return 'A';
+  if (score >= 800_000) return 'BBB';
+  if (score >= 700_000) return 'BB';
+  if (score >= 600_000) return 'B';
+  if (score >= 500_000) return 'C';
   return 'D';
 }
 
@@ -35,14 +37,17 @@ export const ResultScreen: React.FC = () => {
 
   const { score, maxCombo, counts, title, artist, chart, folderPath } = state;
   const total = counts.PERFECT + counts.GREAT + counts.GOOD + counts.MISS;
-  const rank = calcRank(score, total);
+  const rank = calcRank(score);
   const isFullCombo = counts.MISS === 0 && total > 0;
   const achievement = total > 0
     ? Math.round((counts.PERFECT * 1.01 + counts.GREAT * 1.00 + counts.GOOD * 0.50) * 100 / total * 10000) / 10000
     : 0;
 
   const RANK_COLORS: Record<string, string> = {
-    S: '#ffe066', A: '#66d9ff', B: '#99ff99', C: '#ffb74d', D: '#ff6666', F: '#888'
+    S: '#ffe066',
+    AAA: '#ffcc00', AA: '#ffd740', A: '#66d9ff',
+    BBB: '#81c784', BB: '#99ff99', B: '#b2ff59',
+    C: '#ffb74d', D: '#ff6666'
   };
 
   return (
