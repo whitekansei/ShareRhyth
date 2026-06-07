@@ -13,6 +13,7 @@ export interface Chart {
   bpm: number;
   audioFile: string;
   offset: number;
+  difficulty?: number;
   notes: Note[];
 }
 
@@ -21,5 +22,6 @@ export interface ChartMeta {
   title: string;
   artist: string;
   bpm: number;
+  difficulty?: number;
   folderPath: string;
 }

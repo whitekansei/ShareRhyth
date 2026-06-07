@@ -403,6 +403,22 @@ export const EditorScreen: React.FC = () => {
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ color: '#888', fontSize: 10 }}>難易度</span>
+            <input
+              type="number"
+              min={1}
+              max={99}
+              placeholder="未設定"
+              value={chart.difficulty ?? ''}
+              onChange={e => {
+                const v = e.target.value;
+                updateMeta({ difficulty: v === '' ? undefined : Math.max(1, Math.floor(Number(v))) });
+              }}
+              style={inputStyle}
+            />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <span style={{ color: '#888', fontSize: 10 }}>オフセット (秒)</span>
             <input
               type="number"

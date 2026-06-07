@@ -29,6 +29,7 @@ export function registerIpcHandlers(): void {
           title: chart.title,
           artist: chart.artist,
           bpm: chart.bpm,
+          difficulty: chart.difficulty,
           folderPath: join(dir, entry.name)
         });
       } catch {

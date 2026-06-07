@@ -47,6 +47,13 @@ function applyOrder(charts: ChartMeta[], order: string[]): ChartMeta[] {
   return result;
 }
 
+function difficultyColor(d: number): string {
+  if (d <= 3) return '#99ff99';
+  if (d <= 6) return '#ffe066';
+  if (d <= 9) return '#ffb74d';
+  return '#ff6666';
+}
+
 // ── ボタンの共通スタイルヘルパー ──
 const iconBtn = (disabled: boolean, danger = false): React.CSSProperties => ({
   background: 'none',
@@ -266,7 +273,18 @@ export const SongSelectScreen: React.FC = () => {
                         onClick={() => { if (!isDeleting) setSelected(c); }}
                         style={{ flex: 1, padding: '14px 8px 14px 21px', cursor: isDeleting ? 'default' : 'pointer' }}
                       >
-                        <div style={{ fontWeight: 700, fontSize: 14 }}>{c.title}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 700, fontSize: 14 }}>{c.title}</span>
+                          {c.difficulty != null && (
+                            <span style={{
+                              fontSize: 10, fontWeight: 900, padding: '1px 6px',
+                              borderRadius: 3, background: '#1a1a2e',
+                              color: difficultyColor(c.difficulty), flexShrink: 0
+                            }}>
+                              Lv.{c.difficulty}
+                            </span>
+                          )}
+                        </div>
                         <div style={{ color: '#888', fontSize: 12 }}>{c.artist}</div>
                         <div style={{ color: '#666', fontSize: 11, marginTop: 2 }}>BPM {c.bpm}</div>
                       </div>
@@ -410,7 +428,18 @@ export const SongSelectScreen: React.FC = () => {
           <>
             <div style={{ fontSize: 13, color: '#aaa', letterSpacing: 2 }}>{selected.artist}</div>
             <div style={{ fontSize: 36, fontWeight: 900 }}>{selected.title}</div>
-            <div style={{ color: '#666', fontSize: 14 }}>BPM {selected.bpm}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ color: '#666', fontSize: 14 }}>BPM {selected.bpm}</span>
+              {selected.difficulty != null && (
+                <span style={{
+                  fontSize: 15, fontWeight: 900, padding: '2px 10px',
+                  borderRadius: 4, border: `1px solid ${difficultyColor(selected.difficulty)}`,
+                  color: difficultyColor(selected.difficulty)
+                }}>
+                  Lv. {selected.difficulty}
+                </span>
+              )}
+            </div>
 
             <button
               onClick={handlePlay}

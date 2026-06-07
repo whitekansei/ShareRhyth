@@ -14,8 +14,9 @@ export interface Chart {
   bpm: number;
   audioFile: string;
   offset: number;
+  difficulty?: number;
   notes: Note[];
-  shareId?: string; // Supabase の行 ID（初回共有後にローカルへ保存される）
+  shareId?: string;
 }
 
 export interface ChartMeta {
@@ -23,5 +24,6 @@ export interface ChartMeta {
   title: string;
   artist: string;
   bpm: number;
+  difficulty?: number;
   folderPath: string;
 }
