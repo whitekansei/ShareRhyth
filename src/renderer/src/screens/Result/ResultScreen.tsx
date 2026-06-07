@@ -37,6 +37,9 @@ export const ResultScreen: React.FC = () => {
   const total = counts.PERFECT + counts.GREAT + counts.GOOD + counts.MISS;
   const rank = calcRank(score, total);
   const isFullCombo = counts.MISS === 0 && total > 0;
+  const achievement = total > 0
+    ? Math.round((counts.PERFECT * 1.01 + counts.GREAT * 1.00 + counts.GOOD * 0.50) * 100 / total * 10000) / 10000
+    : 0;
 
   const RANK_COLORS: Record<string, string> = {
     S: '#ffe066', A: '#66d9ff', B: '#99ff99', C: '#ffb74d', D: '#ff6666', F: '#888'
@@ -93,8 +96,12 @@ export const ResultScreen: React.FC = () => {
         ))}
       </div>
 
-      <div style={{ fontSize: 14, color: '#aaa', marginBottom: 48 }}>
+      <div style={{ fontSize: 14, color: '#aaa', marginBottom: 8 }}>
         MAX COMBO: <span style={{ color: '#fff', fontWeight: 700 }}>{maxCombo}</span>
+      </div>
+
+      <div style={{ fontSize: 14, color: '#aaa', marginBottom: 48 }}>
+        達成率: <span style={{ color: '#fff', fontWeight: 700 }}>{achievement.toFixed(3)}%</span>
       </div>
 
       <div style={{ display: 'flex', gap: 20 }}>
